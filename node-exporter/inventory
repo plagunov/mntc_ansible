@@ -1,0 +1,19 @@
+[node_exp]
+#alphachip-1 ansible_ssh_host=192.168.80.34
+#alphachip-2 ansible_ssh_host=192.168.80.35
+#alphachip-3 ansible_ssh_host=192.168.80.36
+#alphachip-4 ansible_ssh_host=192.168.80.37
+#mntc-1 ansible_ssh_host=192.168.80.30 ansible_ssh_port=2222
+#mntc-2 ansible_ssh_host=192.168.80.31
+#mntc-3 ansible_ssh_host=192.168.80.32
+#mntc-4 ansible_ssh_host=192.168.80.33
+#eps-ide ansible_ssh_host=192.168.80.228
+#cad101 ansible_ssh_host=192.168.82.11
+
+[all:vars]
+ansible_connection=ssh
+ansible_ssh_port=22
+ansible_user=support
+# ansible_user=administrator
+# ansible_ssh_pass=12345678
+# ansible_sudo_pass=12345678

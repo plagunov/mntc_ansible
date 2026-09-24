@@ -1,0 +1,8 @@
+[Unit]
+ConditionPathExists=
+ConditionPathExists={{ patroni_config_path }}
+
+[Service]
+ExecStart=
+ExecStart=/usr/bin/patroni {{ patroni_config_path }}
+TimeoutSec=0

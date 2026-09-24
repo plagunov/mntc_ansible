@@ -1,0 +1,51 @@
+---
+pgsql_cluster_packages:
+  - postgresql
+  - patroni
+  - etcd-server
+  - etcd-client
+  - keepalived
+  - curl
+
+etcd_config_path: /etc/etcd/etcd.yml
+etcd_initial_cluster_token: etcd-kea-token
+etcd_cluster:
+  - name: node1
+    ip: 192.168.80.20
+  - name: node2
+    ip: 192.168.80.21
+
+# Пустое значение — определить версию по psql -V
+postgresql_version: ""
+patroni_config_path: /etc/patroni/patroni.yml
+patroni_scope: kea-cluster
+patroni_namespace: /service
+patroni_restapi_port: 8008
+patroni_pg_port: 5432
+patroni_pg_hba_network: 192.168.80.0/24
+patroni_shared_buffers: 256MB
+patroni_replication_username: replicator
+patroni_replication_password: SuperSecretReplicationPassword
+patroni_superuser_username: postgres
+patroni_superuser_password: SuperSecretPostgresPassword
+patroni_listen_address: 0.0.0.0
+patroni_nodes:
+  - name: pg-node1
+    ip: 192.168.80.20
+    keepalived_priority: 100
+  - name: pg-node2
+    ip: 192.168.80.21
+    keepalived_priority: 95
+
+# Пустое значение — интерфейс, на котором настроен адрес узла
+keepalived_interface: ""
+keepalived_vip: 192.168.80.25/24
+keepalived_virtual_router_id: 51
+keepalived_auth_pass: KeaVipPass
+keepalived_check_script: /usr/local/bin/check_patroni.sh
+
+kea_admin_package: kea-admin
+kea_db_host: "{{ keepalived_vip.split('/')[0] }}"
+kea_db_name: kea_db
+kea_db_user: kea
+kea_db_password: R3qHcuv2Vo

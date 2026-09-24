@@ -1,0 +1,20 @@
+---
+- name: Deploy Kea DHCP HA with FreeIPA DDNS
+  hosts: server
+  become: true
+  become_method: sudo
+  gather_facts: true
+  any_errors_fatal: true
+  environment: "{{ proxy_env | default({}) }}"
+
+  pre_tasks:
+    - name: ping
+      ansible.builtin.ping:
+
+    - name: Определить роль Kea HA (primary / standby)
+      ansible.builtin.set_fact:
+        kea_ha_role: "{{ 'primary' if inventory_hostname == kea_ha_primary_host else 'standby' }}"
+
+  roles:
+    - role: pgsql_cluster
+    - role: kea

@@ -1,0 +1,70 @@
+---
+- hosts: all
+  become: true
+  become_method: sudo
+  tasks:
+    - block:
+      - name: Copy certificate files
+        # noqa: risky-file-permissions
+        ansible.builtin.template:
+          src: '{{ item.src }}'
+          dest: '/etc/angie/ssl/'
+        with_community.general.filetree: files/
+        when: item.state == 'file'
+      - name: Set dir and permition
+        shell: |
+          chown -R root:root /etc/angie/ssl &&
+          chmod 644 /etc/angie/ssl/*
+      - name: Restart Angie service
+        ansible.builtin.systemd:
+          daemon_reload: false
+          name: angie
+          state: restarted
+          enabled: true
+      when:
+        - inventory_hostname in groups['angie']
+      tags: angie
+
+    - block:
+      - name: Copy certificate files
+        # noqa: risky-file-permissions
+        ansible.builtin.template:
+          src: '{{ item.src }}'
+          dest: '/etc/nginx/ssl/'
+        with_community.general.filetree: files/
+        when: item.state == 'file'
+      - name: Set dir and permition
+        shell: |
+          chown -R root:root /etc/nginx/ssl &&
+          chmod 644 /etc/nginx/ssl/*
+      - name: Restart Nginx service
+        ansible.builtin.systemd:
+          daemon_reload: false
+          name: nginx
+          state: restarted
+          enabled: true
+      when:
+        - inventory_hostname in groups['nginx']
+      tags: nginx
+
+    - block:
+      - name: Copy certificate files
+        # noqa: risky-file-permissions
+        ansible.builtin.template:
+          src: '{{ item.src }}'
+          dest: '/opt/guacamole/nginx/certs/'
+        with_community.general.filetree: files/
+        when: item.state == 'file'
+      - name: Set dir and permition
+        shell: |
+          chown -R root:root /opt/guacamole/nginx/certs &&
+          chmod 644 /opt/guacamole/nginx/certs/*
+      - name: Restart VDI service
+        ansible.builtin.systemd:
+          daemon_reload: false
+          name: vdi
+          state: restarted
+          enabled: true
+      when:
+        - inventory_hostname in groups['guacamole']
+      tags: guacamole

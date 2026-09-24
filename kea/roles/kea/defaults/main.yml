@@ -1,0 +1,28 @@
+---
+# Домен и DNS FreeIPA
+kea_domain: mntc.local
+kea_dns_servers:
+  - 192.168.80.20
+  - 192.168.80.21
+
+# Хост с ролью primary в HA (остальные в группе server — standby)
+kea_ha_primary_host: ldap.mntc.local
+
+# Control Agent / HA API
+kea_ctrl_agent_port: 8000
+
+# Пример подсети (заполнить под реальную сеть)
+kea_subnet4: "192.168.80.0/24"
+kea_pool_start: "192.168.80.100"
+kea_pool_end: "192.168.80.200"
+kea_gateway: "192.168.80.1"
+
+# DDNS / TSIG
+kea_ddns_enabled: true
+kea_tsig_key_name: kea-ddns-key
+kea_tsig_algorithm: HMAC-SHA256
+kea_tsig_keygen_algorithm: hmac-sha256
+kea_tsig_key_path: /etc/bind/kea-ddns.key
+kea_tsig_key_owner: bind
+kea_tsig_key_group: bind
+kea_tsig_key_mode: "0640"

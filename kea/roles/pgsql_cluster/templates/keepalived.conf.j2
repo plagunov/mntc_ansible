@@ -1,0 +1,25 @@
+vrrp_script check_pg {
+    script "{{ keepalived_check_script }}"
+    interval 2
+    fall 2
+    rise 2
+    weight 0
+}
+
+vrrp_instance VI_1 {
+    state BACKUP
+    interface {{ keepalived_bind_interface }}
+    virtual_router_id {{ keepalived_virtual_router_id }}
+    priority {{ patroni_node.keepalived_priority }}
+    advert_int 1
+    authentication {
+        auth_type PASS
+        auth_pass {{ keepalived_auth_pass }}
+    }
+    virtual_ipaddress {
+        {{ keepalived_vip }}
+    }
+    track_script {
+        check_pg
+    }
+}

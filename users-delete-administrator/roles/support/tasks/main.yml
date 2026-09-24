@@ -1,0 +1,125 @@
+---
+- block:
+    - name: Check if users exist using getent
+      ansible.builtin.getent:
+        database: passwd
+        key: "{{ item.name }}"
+      register: user_check_results
+      ignore_errors: true
+      loop: "{{ sudo_users | list }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Report on user existence
+      ansible.builtin.debug:
+        msg: "User {{ item.item.name }} not exist. Creating..."
+      loop: "{{ user_check_results.results }}"
+      when: item.failed
+
+    - name: Report on user existence
+      ansible.builtin.debug:
+        msg: "User {{ item.item.name }} exist"
+      loop: "{{ user_check_results.results }}"
+      when: not item.failed
+
+#
+    - name: Ensure required groups exist
+      ansible.builtin.group:
+        name: "{{ item.item.name }}"
+        state: present
+      loop: "{{ user_check_results.results }}"
+      when: item.failed
+
+    - name: Create user if not found
+      ansible.builtin.user:
+        name: "{{ item.item.name }}"
+        group: "{{ item.item.name }}"
+        shell: /bin/bash
+        create_home: yes
+        state: present
+      loop: "{{ user_check_results.results }}"
+      when: item.failed
+
+    - name: Modify user groups
+      ansible.builtin.user:
+        name: "{{ item.item.name }}"
+        groups: cdrom,floppy,audio,dip,video,plugdev,netdev,lpadmin,scanner,astra-admin,astra-console
+        append: yes
+        state: present
+      loop: "{{ user_check_results.results }}"
+      when: item.failed
+
+  tags: support
+  when: sudo_users is defined and sudo_users | length > 0
+
+- block:
+    - name: Copy .ssh/authorized_keys from user administrator
+      ansible.builtin.copy:
+        src: /home/administrator/.ssh/
+        dest: /home/{{ item.name }}/.ssh/
+        remote_src: yes
+        owner: "{{ item.name }}"
+        group: "{{ item.name }}"
+        mode: "0700"
+      loop: "{{ sudo_users | list }}"
+      when: ansible_user == "administrator"
+
+    - name: Copy .ssh/authorized_keys from user suser
+      ansible.builtin.copy:
+        src: /home/suser/.ssh/
+        dest: /home/{{ item.name }}/.ssh/
+        remote_src: yes
+        owner: "{{ item.name }}"
+        group: "{{ item.name }}"
+        mode: "0700"
+      loop: "{{ sudo_users | list }}"
+      when: ansible_user == "suser"
+
+  tags: support,support_copy
+  when: copy_admin_keys | bool
+
+- block:
+    - name: Get running processes
+      shell: "ps -ef | grep -v grep | grep -w {{ item }} | awk '{print $2}'"
+      register: running_processes
+      loop: "{{ users_to_delete }}"
+
+    - name: Remove a specific string from stdout_lines
+      set_fact:
+        clean_output: "{{ item.stdout_lines | replace('[','') | replace(']','') }}"
+      with_items: "{{ running_processes.results }}"
+
+    - name: Report running processes
+      ansible.builtin.debug:
+        msg: "Process {{ clean_output }}"
+      with_items: "{{ running_processes.results }}"
+
+    - name: Kill running processes
+      shell: "kill {{ clean_output }}"
+      with_items: "{{ running_processes.results }}"
+      when: clean_output is defined and clean_output | length > 0
+
+    - wait_for:
+        path: "/proc/{{ clean_output }}/status"
+        state: absent
+      with_items: "{{ running_processes.results }}"
+      ignore_errors: yes
+      register: killed_processes
+      when: clean_output is defined and clean_output | length > 0
+
+    - name: Force kill stuck processes
+      shell: "kill -9 {{ clean_output }}"
+      with_items: "{{ killed_processes.results | select('failed') | map(attribute='item') | list }}"
+
+    - name: Remove old user accounts
+      ansible.builtin.user:
+        name: "{{ item }}"
+        state: absent
+        remove: true
+      loop: "{{ users_to_delete }}"
+      ignore_errors: true
+
+  tags: support,delete_old_accounts
+  when: users_to_delete is defined and users_to_delete | length > 0
+
+...

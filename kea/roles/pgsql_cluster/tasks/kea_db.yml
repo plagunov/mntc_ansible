@@ -1,0 +1,127 @@
+---
+- name: Установить kea-admin
+  ansible.builtin.apt:
+    name: "{{ kea_admin_package }}"
+    state: present
+
+- name: Сохранить пароль подключения к PostgreSQL
+  ansible.builtin.copy:
+    dest: /root/.pgpass
+    content: |
+      {{ kea_db_host }}:{{ patroni_pg_port }}:*:{{ patroni_superuser_username }}:{{ patroni_superuser_password }}
+      {{ kea_db_host }}:{{ patroni_pg_port }}:*:{{ kea_db_user }}:{{ kea_db_password }}
+    owner: root
+    group: root
+    mode: "0600"
+  run_once: true
+  no_log: true
+
+- name: Дождаться PostgreSQL на виртуальном адресе
+  ansible.builtin.command:
+    argv:
+      - psql
+      - -h
+      - "{{ kea_db_host }}"
+      - -p
+      - "{{ patroni_pg_port | string }}"
+      - -U
+      - "{{ patroni_superuser_username }}"
+      - -d
+      - postgres
+      - -v
+      - ON_ERROR_STOP=1
+      - -c
+      - SELECT 1
+  register: kea_db_ping
+  until: kea_db_ping.rc == 0
+  retries: 40
+  delay: 5
+  changed_when: false
+  run_once: true
+
+- name: Создать пользователя kea
+  ansible.builtin.shell:
+    cmd: |
+      psql -h "$KEA_DB_HOST" -p "$KEA_DB_PORT" -U "$PGUSER" -d postgres -v ON_ERROR_STOP=1 \
+        -v kea_user="$KEA_DB_USER" -v kea_password="$KEA_DB_PASSWORD" <<'SQL'
+      SELECT format('CREATE ROLE %I LOGIN PASSWORD %L', :'kea_user', :'kea_password')
+      WHERE NOT EXISTS (
+        SELECT FROM pg_catalog.pg_roles WHERE rolname = :'kea_user'
+      )
+      \gexec
+      SQL
+  environment:
+    KEA_DB_HOST: "{{ kea_db_host }}"
+    KEA_DB_PORT: "{{ patroni_pg_port }}"
+    PGUSER: "{{ patroni_superuser_username }}"
+    PGPASSWORD: "{{ patroni_superuser_password }}"
+    KEA_DB_USER: "{{ kea_db_user }}"
+    KEA_DB_PASSWORD: "{{ kea_db_password }}"
+  register: kea_role_create
+  changed_when: "'CREATE ROLE' in kea_role_create.stdout"
+  run_once: true
+  no_log: true
+
+- name: Создать базу kea_db
+  ansible.builtin.shell:
+    cmd: |
+      psql -h "$KEA_DB_HOST" -p "$KEA_DB_PORT" -U "$PGUSER" -d postgres -v ON_ERROR_STOP=1 \
+        -v kea_user="$KEA_DB_USER" -v kea_db="$KEA_DB_NAME" <<'SQL'
+      SELECT format('CREATE DATABASE %I OWNER %I', :'kea_db', :'kea_user')
+      WHERE NOT EXISTS (
+        SELECT FROM pg_database WHERE datname = :'kea_db'
+      )
+      \gexec
+      SQL
+  environment:
+    KEA_DB_HOST: "{{ kea_db_host }}"
+    KEA_DB_PORT: "{{ patroni_pg_port }}"
+    PGUSER: "{{ patroni_superuser_username }}"
+    PGPASSWORD: "{{ patroni_superuser_password }}"
+    KEA_DB_USER: "{{ kea_db_user }}"
+    KEA_DB_NAME: "{{ kea_db_name }}"
+  register: kea_database_create
+  changed_when: "'CREATE DATABASE' in kea_database_create.stdout"
+  run_once: true
+  no_log: true
+
+- name: Проверить, инициализирована ли схема Kea
+  ansible.builtin.command:
+    argv:
+      - psql
+      - -h
+      - "{{ kea_db_host }}"
+      - -p
+      - "{{ patroni_pg_port | string }}"
+      - -U
+      - "{{ kea_db_user }}"
+      - -d
+      - "{{ kea_db_name }}"
+      - -tAc
+      - >-
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'lease4'
+  environment:
+    PGPASSWORD: "{{ kea_db_password }}"
+  register: kea_schema
+  changed_when: false
+  run_once: true
+  no_log: true
+
+- name: Инициализировать схему базы Kea DHCP
+  ansible.builtin.command:
+    argv:
+      - kea-admin
+      - db-init
+      - pgsql
+      - -u
+      - "{{ kea_db_user }}"
+      - -p
+      - "{{ kea_db_password }}"
+      - -n
+      - "{{ kea_db_name }}"
+      - -h
+      - "{{ kea_db_host }}"
+  when: (kea_schema.stdout | trim) != '1'
+  run_once: true
+  no_log: true

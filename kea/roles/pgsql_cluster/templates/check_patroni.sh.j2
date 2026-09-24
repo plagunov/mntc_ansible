@@ -1,0 +1,2 @@
+#!/bin/bash
+curl -s -o /dev/null -w "%{http_code}" http://localhost:{{ patroni_restapi_port }}/primary | grep -q "200"

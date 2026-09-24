@@ -1,0 +1,27 @@
+[server]
+
+[workstation]
+# eps-ide.mntc.local ansible_host=192.168.80.228 ansible_user=support
+# mntc-1.mntc.local ansible_host=192.168.80.30 ansible_ssh_port=2222
+# mntc-2.mntc.local ansible_host=192.168.80.31
+# mntc-3.mntc.local ansible_host=192.168.80.32
+# mntc-4.mntc.local ansible_host=192.168.80.33
+# alphachip-1.mntc.local ansible_host=192.168.80.34
+# alphachip-2.mntc.local ansible_host=192.168.80.35
+# alphachip-3.mntc.local ansible_host=192.168.80.36
+# alphachip-4.mntc.local ansible_host=192.168.80.37
+# miet-1.mntc.local ansible_host=192.168.80.38
+# npc-tc-1.mntc.local ansible_host=192.168.80.39
+# dzheleznikov-astra.mntc.local ansible_host=192.168.80.112
+# bpm-astra.mntc.local ansible_host=192.168.80.205
+# sapr-synthesizer-alse.mntc.local ansible_host=192.168.80.113 # пользователь не удален!
+# eps-alfachip-editors.mntc.local ansible_host=192.168.80.92
+
+[new_servers:children]
+server
+workstation
+
+[all:vars]
+ansible_connection=ssh
+ansible_ssh_port=22
+ansible_user=support

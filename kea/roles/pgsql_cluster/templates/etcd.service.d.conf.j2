@@ -1,0 +1,4 @@
+[Service]
+UnsetEnvironment=ETCD_NAME ETCD_DATA_DIR DAEMON_ARGS
+ExecStart=
+ExecStart=/usr/bin/etcd --config-file {{ etcd_config_path }}

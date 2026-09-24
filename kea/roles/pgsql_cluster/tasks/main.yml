@@ -1,0 +1,315 @@
+---
+- name: Обновить кэш apt и установить пакеты кластера PostgreSQL
+  ansible.builtin.apt:
+    name: "{{ pgsql_cluster_packages }}"
+    state: present
+    update_cache: true
+
+- name: Остановить и отключить одиночную службу PostgreSQL
+  ansible.builtin.systemd:
+    name: postgresql
+    state: stopped
+    enabled: false
+
+- name: Определить узел etcd по IP хоста
+  ansible.builtin.set_fact:
+    etcd_node: "{{ etcd_cluster | selectattr('ip', 'equalto', ansible_host) | first }}"
+
+- name: Проверить, инициализирован ли каталог данных etcd
+  ansible.builtin.stat:
+    path: "/var/lib/etcd/{{ etcd_node.name }}.etcd/member"
+  register: etcd_member_dir
+
+- name: Выбрать состояние начальной сборки кластера etcd
+  ansible.builtin.set_fact:
+    etcd_initial_cluster_state: "{{ 'existing' if etcd_member_dir.stat.exists else 'new' }}"
+
+- name: Создать каталоги конфигурации и данных etcd
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - path: /etc/etcd
+      owner: root
+      group: root
+      mode: "0755"
+    - path: "/var/lib/etcd/{{ etcd_node.name }}.etcd"
+      owner: etcd
+      group: etcd
+      mode: "0700"
+    - path: /etc/systemd/system/etcd.service.d
+      owner: root
+      group: root
+      mode: "0755"
+
+- name: Записать конфигурацию /etc/etcd/etcd.yml
+  ansible.builtin.template:
+    src: etcd.yml.j2
+    dest: "{{ etcd_config_path }}"
+    owner: root
+    group: etcd
+    mode: "0640"
+  register: etcd_config
+
+- name: Подключить etcd к файлу конфигурации
+  ansible.builtin.template:
+    src: etcd.service.d.conf.j2
+    dest: /etc/systemd/system/etcd.service.d/config-file.conf
+    owner: root
+    group: root
+    mode: "0644"
+  register: etcd_dropin
+
+- name: Включить и запустить etcd
+  ansible.builtin.systemd:
+    name: etcd
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Прочитать командную строку запущенного etcd
+  ansible.builtin.shell: |
+    pid=$(systemctl show -p MainPID --value etcd)
+    if [ -n "$pid" ] && [ "$pid" != 0 ] && [ -r "/proc/$pid/cmdline" ]; then
+      tr '\0' ' ' < "/proc/$pid/cmdline"
+    fi
+  register: etcd_cmdline
+  changed_when: false
+  failed_when: false
+
+- name: Перезапустить etcd с файлом конфигурации
+  ansible.builtin.systemd:
+    name: etcd
+    state: restarted
+    daemon_reload: true
+  when: >-
+    etcd_config.changed or etcd_dropin.changed
+    or (etcd_config_path not in (etcd_cmdline.stdout | default('')))
+
+- name: Дождаться etcd на адресе узла
+  ansible.builtin.command: etcdctl --endpoints=http://{{ etcd_node.ip }}:2379 endpoint health
+  register: etcd_endpoint_health
+  changed_when: false
+  retries: 15
+  delay: 2
+  until: etcd_endpoint_health.rc == 0
+  environment:
+    ETCDCTL_API: "3"
+
+- name: Зафиксировать initial-cluster-state existing после успешного старта
+  ansible.builtin.template:
+    src: etcd.yml.j2
+    dest: "{{ etcd_config_path }}"
+    owner: root
+    group: etcd
+    mode: "0640"
+  vars:
+    etcd_initial_cluster_state: existing
+  when: not etcd_member_dir.stat.exists
+
+- name: Определить мажорную версию PostgreSQL
+  ansible.builtin.command: psql -V
+  register: psql_version_cmd
+  changed_when: false
+
+- name: Зафиксировать мажорную версию PostgreSQL
+  ansible.builtin.set_fact:
+    postgresql_major_version: "{{ postgresql_version if (postgresql_version | string | length) > 0 else (psql_version_cmd.stdout | regex_search('[0-9]+')) }}"
+
+- name: Проверить наличие pg_ctl выбранной версии
+  ansible.builtin.stat:
+    path: "/usr/lib/postgresql/{{ postgresql_major_version }}/bin/pg_ctl"
+  register: postgresql_pg_ctl
+
+- name: Остановить настройку, если каталог bin PostgreSQL не найден
+  ansible.builtin.assert:
+    that:
+      - postgresql_pg_ctl.stat.exists
+    fail_msg: >-
+      Не найден /usr/lib/postgresql/{{ postgresql_major_version }}/bin/pg_ctl.
+      Вывод psql -V: {{ psql_version_cmd.stdout }}
+
+- name: Определить узел Patroni по IP хоста
+  ansible.builtin.set_fact:
+    patroni_node: "{{ patroni_nodes | selectattr('ip', 'equalto', ansible_host) | first }}"
+    patroni_data_dir: "/var/lib/postgresql/{{ postgresql_major_version }}/main"
+
+- name: Проверить, инициализирован ли каталог данных Patroni
+  ansible.builtin.stat:
+    path: "{{ patroni_data_dir }}/patroni.dynamic.json"
+  register: patroni_initialized
+
+- name: Проверить, запущена ли служба Patroni
+  ansible.builtin.command: systemctl is-active patroni
+  register: patroni_active
+  changed_when: false
+  failed_when: false
+
+- name: Удалить каталог данных одиночного PostgreSQL перед первой сборкой Patroni
+  ansible.builtin.file:
+    path: "{{ patroni_data_dir }}"
+    state: absent
+  when:
+    - not patroni_initialized.stat.exists
+    - patroni_active.stdout != 'active'
+
+- name: Создать каталог конфигурации Patroni
+  ansible.builtin.file:
+    path: /etc/patroni
+    state: directory
+    owner: root
+    group: postgres
+    mode: "0750"
+
+- name: Записать конфигурацию /etc/patroni/patroni.yml
+  ansible.builtin.template:
+    src: patroni.yml.j2
+    dest: "{{ patroni_config_path }}"
+    owner: postgres
+    group: postgres
+    mode: "0600"
+  register: patroni_config
+  no_log: true
+
+- name: Создать каталог drop-in службы Patroni
+  ansible.builtin.file:
+    path: /etc/systemd/system/patroni.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Подключить Patroni к файлу конфигурации
+  ansible.builtin.template:
+    src: patroni.service.d.conf.j2
+    dest: /etc/systemd/system/patroni.service.d/config-file.conf
+    owner: root
+    group: root
+    mode: "0644"
+  register: patroni_dropin
+
+- name: Сопоставить путь конфигурации Patroni с unit-файлом пакета
+  ansible.builtin.file:
+    src: "{{ patroni_config_path }}"
+    dest: /etc/patroni/config.yml
+    state: link
+
+- name: Сбросить счётчик неудачных запусков Patroni
+  ansible.builtin.command: systemctl reset-failed patroni
+  changed_when: false
+  failed_when: false
+
+- name: Включить и запустить Patroni
+  ansible.builtin.systemd:
+    name: patroni
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Перезапустить Patroni после изменения конфигурации работающего кластера
+  ansible.builtin.systemd:
+    name: patroni
+    state: restarted
+    daemon_reload: true
+  when:
+    - patroni_initialized.stat.exists
+    - patroni_config.changed or patroni_dropin.changed
+  throttle: 1
+
+- name: Дождаться API Patroni
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ patroni_restapi_port }}/patroni"
+    status_code: 200
+  register: patroni_api
+  retries: 30
+  delay: 2
+  until: patroni_api.status | default(0) == 200
+
+- name: Использовать заданный интерфейс Keepalived
+  ansible.builtin.set_fact:
+    keepalived_bind_interface: "{{ keepalived_interface }}"
+  when: keepalived_interface | length > 0
+
+- name: Найти интерфейс с адресом узла
+  ansible.builtin.set_fact:
+    keepalived_bind_interface: "{{ item }}"
+  when:
+    - keepalived_interface | length == 0
+    - ansible_host in keepalived_iface_addresses
+  vars:
+    keepalived_iface_facts: "{{ ansible_facts[item | replace('-', '_')] | default({}) }}"
+    keepalived_iface_addresses: >-
+      {{
+        [
+          (keepalived_iface_facts.ipv4 | default({})).address | default('')
+        ]
+        + (
+          keepalived_iface_facts.ipv4_secondaries
+          | default([])
+          | map(attribute='address')
+          | list
+        )
+      }}
+  loop: "{{ ansible_interfaces }}"
+
+- name: Проверить, что интерфейс Keepalived определён
+  ansible.builtin.assert:
+    that:
+      - keepalived_bind_interface | default('') | length > 0
+    fail_msg: >-
+      Не найден интерфейс с адресом {{ ansible_host }}.
+      Задайте keepalived_interface.
+
+- name: Установить скрипт проверки мастера Patroni
+  ansible.builtin.template:
+    src: check_patroni.sh.j2
+    dest: "{{ keepalived_check_script }}"
+    owner: root
+    group: root
+    mode: "0755"
+  register: keepalived_script
+
+- name: Создать каталог конфигурации Keepalived
+  ansible.builtin.file:
+    path: /etc/keepalived
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Записать конфигурацию /etc/keepalived/keepalived.conf
+  ansible.builtin.template:
+    src: keepalived.conf.j2
+    dest: /etc/keepalived/keepalived.conf
+    owner: root
+    group: root
+    mode: "0640"
+  register: keepalived_config
+  no_log: true
+
+- name: Проверить, запущена ли служба Keepalived
+  ansible.builtin.command: systemctl is-active keepalived
+  register: keepalived_active
+  changed_when: false
+  failed_when: false
+
+- name: Включить и запустить Keepalived
+  ansible.builtin.systemd:
+    name: keepalived
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Перезапустить Keepalived после изменения конфигурации
+  ansible.builtin.systemd:
+    name: keepalived
+    state: restarted
+  when:
+    - keepalived_active.stdout == 'active'
+    - keepalived_script.changed or keepalived_config.changed
+
+- name: Создать базу данных Kea
+  ansible.builtin.import_tasks: kea_db.yml

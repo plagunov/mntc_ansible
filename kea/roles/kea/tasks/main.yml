@@ -1,0 +1,61 @@
+---
+- name: Показать параметры развёртывания Kea
+  ansible.builtin.debug:
+    msg:
+      host: "{{ inventory_hostname }}"
+      ha_role: "{{ kea_ha_role }}"
+      domain: "{{ kea_domain }}"
+      subnet: "{{ kea_subnet4 }}"
+      pool: "{{ kea_pool_start }} - {{ kea_pool_end }}"
+      ddns: "{{ kea_ddns_enabled }}"
+
+- name: Проверить наличие TSIG-ключа на первом контроллере
+  ansible.builtin.stat:
+    path: "{{ kea_tsig_key_path }}"
+  register: kea_tsig_key_stat
+  delegate_to: "{{ kea_ha_primary_host }}"
+  run_once: true
+
+- name: Сгенерировать TSIG-ключ на первом контроллере
+  ansible.builtin.command: >-
+    tsig-keygen -a {{ kea_tsig_keygen_algorithm }} {{ kea_tsig_key_name }}
+  register: kea_tsig_keygen
+  changed_when: true
+  delegate_to: "{{ kea_ha_primary_host }}"
+  run_once: true
+  when: not kea_tsig_key_stat.stat.exists
+  no_log: true
+
+- name: Прочитать существующий TSIG-ключ с первого контроллера
+  ansible.builtin.slurp:
+    src: "{{ kea_tsig_key_path }}"
+  register: kea_tsig_key_slurp
+  delegate_to: "{{ kea_ha_primary_host }}"
+  run_once: true
+  when: kea_tsig_key_stat.stat.exists
+  no_log: true
+
+- name: Раздать TSIG-ключ всем контроллерам
+  ansible.builtin.copy:
+    content: "{{ kea_tsig_key_body if kea_tsig_key_body.endswith('\n') else kea_tsig_key_body + '\n' }}"
+    dest: "{{ kea_tsig_key_path }}"
+    owner: "{{ kea_tsig_key_owner }}"
+    group: "{{ kea_tsig_key_group }}"
+    mode: "{{ kea_tsig_key_mode }}"
+  vars:
+    kea_tsig_key_runner: "{{ ansible_play_hosts_all | first }}"
+    kea_tsig_key_body: >-
+      {{
+        hostvars[kea_tsig_key_runner].kea_tsig_keygen.stdout
+        if not (hostvars[kea_tsig_key_runner].kea_tsig_keygen.skipped | default(false))
+        else (hostvars[kea_tsig_key_runner].kea_tsig_key_slurp.content | b64decode)
+      }}
+  register: kea_tsig_key_copy
+  no_log: true
+
+- name: Перезапустить FreeIPA после обновления TSIG-ключа
+  ansible.builtin.command: ipactl restart
+  when: kea_tsig_key_copy.changed
+  throttle: 1
+  timeout: 600
+  changed_when: true

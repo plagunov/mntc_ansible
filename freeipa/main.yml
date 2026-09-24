@@ -1,0 +1,63 @@
+---
+- name: new_server.yml | Pre-check New Servers
+  hosts: all
+  become: true
+  become_method: sudo
+  gather_facts: true
+  any_errors_fatal: true
+  environment: "{{ proxy_env | default({}) }}"
+
+
+  tasks:
+    - name: ping
+      ansible.builtin.ping:
+
+    - name: Установить корректное имя хоста (hostname)
+      ansible.builtin.hostname:
+        name: "{{ inventory_hostname }}"
+
+    - name: Отключить управление /etc/hosts со стороны cloud-init (чтобы изменения не слетали)
+      ansible.builtin.lineinfile:
+        path: /etc/cloud/cloud.cfg
+        regexp: '^manage_etc_hosts:'
+        line: 'manage_etc_hosts: false'
+        state: present
+  
+    - name: Удалить старую привязку ldap к localhost (127.0.1.1)
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: '^127\.0\.1\.1.*ldap'
+        state: absent
+
+    - name: Заменить старый IP (127.0.1.1) или обновить существующий для ldap.mntc.local
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: '.*ldap\.mntc\.local.*'
+        line: '192.168.80.20  ldap.mntc.local  ldap'
+        state: present
+
+    - name: Обновить кэш и установить серверные пакеты FreeIPA
+      ansible.builtin.apt:
+        name:
+          - astra-freeipa-server
+          - fly-admin-freeipa-server
+        state: present
+        update_cache: yes
+
+    - name: Проверить, настроен ли уже сервер FreeIPA
+      ansible.builtin.stat:
+        path: /etc/ipa/default.conf
+      register: ipa_config
+
+    - name: Инициализировать сервер FreeIPA (выполняется только один раз)
+      ansible.builtin.command: >
+        astra-freeipa-server 
+        -d mntc.local 
+        -n ldap 
+        -ip 192.168.80.21 
+        --dogtag 
+        -p tU6q8sD57XXF
+        -y
+      when: not ipa_config.stat.exists
+      async: 1800
+      poll: 10
