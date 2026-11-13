@@ -1,0 +1,44 @@
+---
+- name: Установить пакеты Python для kea-exporter
+  ansible.builtin.apt:
+    name: "{{ kea_exporter_packages }}"
+    state: present
+    update_cache: true
+
+- name: Создать пользователя kea-exporter
+  ansible.builtin.user:
+    name: "{{ kea_exporter_user }}"
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+
+- name: Установить kea-exporter в виртуальное окружение
+  ansible.builtin.pip:
+    name: "kea-exporter=={{ kea_exporter_version }}"
+    virtualenv: "{{ kea_exporter_venv }}"
+    virtualenv_command: python3 -m venv
+    state: present
+  register: kea_exporter_pip
+
+- name: Записать unit-файл kea-exporter
+  ansible.builtin.template:
+    src: kea-exporter.service.j2
+    dest: /etc/systemd/system/kea-exporter.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: kea_exporter_unit
+
+- name: Включить и запустить kea-exporter
+  ansible.builtin.systemd:
+    name: kea-exporter
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Перезапустить kea-exporter после изменения
+  ansible.builtin.systemd:
+    name: kea-exporter
+    state: restarted
+    daemon_reload: true
+  when: kea_exporter_pip.changed or kea_exporter_unit.changed

@@ -1,0 +1,58 @@
+---
+- name: Обновить кэш apt и установить Kea DHCP и Control Agent
+  ansible.builtin.apt:
+    name: "{{ kea_packages }}"
+    state: present
+    update_cache: true
+
+- name: Записать kea-dhcp4.conf
+  ansible.builtin.template:
+    src: kea-dhcp4.conf.j2
+    dest: "{{ kea_dhcp4_config_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Проверить конфигурацию kea-dhcp4
+  ansible.builtin.command: kea-dhcp4 -t {{ kea_dhcp4_config_path }}
+  changed_when: false
+
+- name: Записать kea-ctrl-agent.conf
+  ansible.builtin.template:
+    src: kea-ctrl-agent.conf.j2
+    dest: "{{ kea_ctrl_agent_config_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Проверить конфигурацию kea-ctrl-agent
+  ansible.builtin.command: kea-ctrl-agent -t {{ kea_ctrl_agent_config_path }}
+  changed_when: false
+
+- name: Перезапустить службы Kea на primary
+  ansible.builtin.command: systemctl restart {{ item }}
+  loop:
+    - kea-ctrl-agent
+    - kea-dhcp4-server
+  when: inventory_hostname == kea_ha_primary_host
+  changed_when: true
+
+- name: Добавить службы Kea в автозапуск на primary
+  ansible.builtin.command: systemctl enable kea-ctrl-agent kea-dhcp4-server
+  when: inventory_hostname == kea_ha_primary_host
+  register: kea_enable_primary
+  changed_when: "'Created symlink' in kea_enable_primary.stdout"
+
+- name: Перезапустить службы Kea на standby
+  ansible.builtin.command: systemctl restart {{ item }}
+  loop:
+    - kea-ctrl-agent
+    - kea-dhcp4-server
+  when: inventory_hostname != kea_ha_primary_host
+  changed_when: true
+
+- name: Добавить службы Kea в автозапуск на standby
+  ansible.builtin.command: systemctl enable kea-ctrl-agent kea-dhcp4-server
+  when: inventory_hostname != kea_ha_primary_host
+  register: kea_enable_standby
+  changed_when: "'Created symlink' in kea_enable_standby.stdout"

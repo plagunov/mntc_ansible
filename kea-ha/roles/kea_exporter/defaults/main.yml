@@ -1,0 +1,12 @@
+---
+kea_exporter_packages:
+  - python3-pip
+  - python3-venv
+
+kea_exporter_version: "0.7.0"
+kea_exporter_venv: /opt/kea-exporter
+kea_exporter_user: kea-exporter
+kea_exporter_address: "{{ ansible_host }}"
+kea_exporter_port: 9547
+kea_exporter_interval: 10
+kea_exporter_target: "http://{{ ansible_host }}:{{ kea_ctrl_agent_port | default(8000) }}/"

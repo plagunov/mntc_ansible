@@ -1,0 +1,17 @@
+---
+- name: kea-dhcp
+  hosts: server
+  become: true
+  become_method: sudo
+  gather_facts: true
+  any_errors_fatal: true
+
+  pre_tasks:
+    - name: ping
+      ansible.builtin.ping:
+
+  roles:
+    - role: chrony
+    - role: freeipa_client
+    - role: kea
+    - role: kea_exporter

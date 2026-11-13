@@ -1,0 +1,8 @@
+---
+ipa_domain: mntc.local
+ipa_realm: MNTC.LOCAL
+ipa_server: mntc-ldap.mntc.local
+ipa_admin_principal: admin
+ipa_admin_password: SF4X6hdX
+ipa_client_packages:
+  - freeipa-client

@@ -1,0 +1,8 @@
+[server]
+dhcp1.mntc.local ansible_host=192.168.80.22 ansible_user=support ansible_ssh_private_key_file=/home/iac/.ssh/id_ed25519
+dhcp2.mntc.local ansible_host=192.168.80.23 ansible_user=support ansible_ssh_private_key_file=/home/iac/.ssh/id_ed25519
+
+[all:vars]
+ansible_connection=ssh
+ansible_ssh_port=22
+ansible_user=support

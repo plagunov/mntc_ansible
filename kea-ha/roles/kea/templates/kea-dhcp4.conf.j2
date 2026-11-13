@@ -1,0 +1,368 @@
+{% macro host_in_subnet(ip, cidr) -%}
+{%- set net, bits = cidr.split('/') -%}
+{%- set bits = bits | int -%}
+{%- set ip_p = ip.split('.') | map('int') | list -%}
+{%- set net_p = net.split('.') | map('int') | list -%}
+{%- set full = bits // 8 -%}
+{%- set rem = bits % 8 -%}
+{%- if ip_p[:full] != net_p[:full] -%}
+false
+{%- elif rem == 0 -%}
+true
+{%- else -%}
+{%- set size = 2 ** (8 - rem) -%}
+{{ 'true' if (ip_p[full] // size) == (net_p[full] // size) else 'false' }}
+{%- endif -%}
+{%- endmacro %}
+{
+"Dhcp4": {
+    "reservations-out-of-pool": true,
+    "interfaces-config": {
+        "interfaces": [ "{{ kea_dhcp_interface }}" ]
+    },
+
+    "control-socket": {
+        "socket-type": "unix",
+        "socket-name": "{{ kea_ctrl_socket }}"
+    },
+
+    "lease-database": {
+        "type": "memfile",
+        "lfc-interval": 3600
+    },
+
+    "expired-leases-processing": {
+        "reclaim-timer-wait-time": 10,
+        "flush-reclaimed-timer-wait-time": 25,
+        "hold-reclaimed-time": 3600,
+        "max-reclaim-leases": 100,
+        "max-reclaim-time": 250,
+        "unwarned-reclaim-cycles": 5
+    },
+
+    "valid-lifetime": {{ kea_valid_lifetime }},
+    "renew-timer": {{ (kea_valid_lifetime / 2) | int }},
+    "rebind-timer": {{ (kea_valid_lifetime * 7 / 8) | int }},
+
+    "hooks-libraries": [
+        {
+            "library": "{{ kea_hooks_dir }}/libdhcp_lease_cmds.so"
+        },
+        {
+            "library": "{{ kea_hooks_dir }}/libdhcp_ha.so",
+            "parameters": {
+                "high-availability": [
+                    {
+                        "this-server-name": "{{ (kea_ha_servers | selectattr('ip', 'equalto', ansible_host) | first).name }}",
+                        "mode": "{{ kea_ha_mode }}",
+                        "heartbeat-delay": 10000,
+                        "max-response-delay": 60000,
+                        "max-ack-delay": 5000,
+                        "max-unacked-clients": 5,
+                        "peers": [
+{% for peer in kea_ha_servers %}
+                            {
+                                "name": "{{ peer.name }}",
+                                "url": "http://{{ peer.ip }}:{{ kea_ctrl_agent_port }}/",
+                                "role": "{{ peer.role }}",
+                                "auto-failover": true
+                            }{{ "," if not loop.last else "" }}
+{% endfor %}
+                        ]
+                    }
+                ]
+            }
+        }
+    ],
+
+    "client-classes": [
+        {
+            "name": "{{ kea_pool_class_accord }}",
+            "test": "option[77].exists and option[77].text == '{{ kea_pool_class_id }}'"
+        },
+        {
+            "name": "pool-83-default",
+            "test": "not member('{{ kea_pool_class_accord }}')"
+        }
+    ],
+
+    "subnet4": [
+        {
+            "id": 1,
+            "subnet": "{{ kea_subnet4 }}",
+            "next-server": "{{ kea_pxe_next_server }}",
+            "boot-file-name": "{{ kea_pxe_boot_file }}",
+            "pools": [
+                {
+                    "pool": "{{ kea_pool_class_start }} - {{ kea_pool_class_end }}",
+                    "client-class": "{{ kea_pool_class_accord }}",
+                    "user-context": {
+                        "comment": "{{ kea_pool_class_accord }}"
+                    }
+                },
+                {
+                    "pool": "{{ kea_pool_start }} - {{ kea_pool_end }}",
+                    "client-class": "pool-83-default",
+                    "user-context": {
+                        "comment": "{{ kea_pool_name }}"
+                    }
+                }
+            ],
+            "reservations": [
+{% for host in kea_reservations if host_in_subnet(host.ip_address, kea_subnet4) | trim == 'true' %}
+                {
+                    "hw-address": "{{ host.hw_address }}",
+                    "ip-address": "{{ host.ip_address }}"
+                    {%- if host.hostname is defined %},
+                    "hostname": "{{ host.hostname }}"
+                    {%- endif %}
+
+                }{{ "," if not loop.last else "" }}
+{% endfor %}
+            ],
+            "option-data": [
+                {
+                    "name": "routers",
+                    "data": "{{ kea_gateway }}"
+                },
+                {
+                    "name": "domain-name-servers",
+                    "data": "{{ kea_dns_servers | join(', ') }}"
+                },
+                {
+                    "name": "domain-name",
+                    "data": "{{ kea_domain }}"
+                }
+            ]
+        },
+        {
+            "id": 2,
+            "subnet": "{{ kea_subnet4_2 }}",
+            "pools": [
+                {
+                    "pool": "{{ kea_pool2_start }} - {{ kea_pool2_end }}",
+                    "user-context": {
+                        "comment": "{{ kea_pool2_name }}"
+                    }
+                }
+            ],
+            "reservations": [
+{% for host in kea_reservations if host_in_subnet(host.ip_address, kea_subnet4_2) | trim == 'true' %}
+                {
+                    "hw-address": "{{ host.hw_address }}",
+                    "ip-address": "{{ host.ip_address }}"
+                    {%- if host.hostname is defined %},
+                    "hostname": "{{ host.hostname }}"
+                    {%- endif %}
+
+                }{{ "," if not loop.last else "" }}
+{% endfor %}
+            ],
+            "option-data": [
+                {
+                    "name": "routers",
+                    "data": "{{ kea_gateway_2 }}"
+                },
+                {
+                    "name": "domain-name-servers",
+                    "data": "{{ kea_dns_servers_2 | join(', ') }}"
+                },
+                {
+                    "name": "domain-name",
+                    "data": "{{ kea_domain }}"
+                }
+            ]
+        },
+        {
+            "id": 3,
+            "subnet": "{{ kea_subnet4_3 }}",
+            "pools": [
+                {
+                    "pool": "{{ kea_pool3_start }} - {{ kea_pool3_end }}",
+                    "user-context": {
+                        "comment": "{{ kea_pool3_name }}"
+                    }
+                }
+            ],
+            "reservations": [
+{% for host in kea_reservations if host_in_subnet(host.ip_address, kea_subnet4_3) | trim == 'true' %}
+                {
+                    "hw-address": "{{ host.hw_address }}",
+                    "ip-address": "{{ host.ip_address }}"
+                    {%- if host.hostname is defined %},
+                    "hostname": "{{ host.hostname }}"
+                    {%- endif %}
+
+                }{{ "," if not loop.last else "" }}
+{% endfor %}
+            ],
+            "option-data": [
+                {
+                    "name": "routers",
+                    "data": "{{ kea_gateway_3 }}"
+                },
+                {
+                    "name": "domain-name-servers",
+                    "data": "{{ kea_dns_servers_3 | join(', ') }}"
+                },
+                {
+                    "name": "domain-name",
+                    "data": "{{ kea_domain }}"
+                }
+            ]
+        },
+        {
+            "id": 4,
+            "subnet": "{{ kea_subnet4_4 }}",
+            "pools": [
+                {
+                    "pool": "{{ kea_pool4_start }} - {{ kea_pool4_end }}",
+                    "user-context": {
+                        "comment": "{{ kea_pool4_name }}"
+                    }
+                }
+            ],
+            "reservations": [
+{% for host in kea_reservations if host_in_subnet(host.ip_address, kea_subnet4_4) | trim == 'true' %}
+                {
+                    "hw-address": "{{ host.hw_address }}",
+                    "ip-address": "{{ host.ip_address }}"
+                    {%- if host.hostname is defined %},
+                    "hostname": "{{ host.hostname }}"
+                    {%- endif %}
+
+                }{{ "," if not loop.last else "" }}
+{% endfor %}
+            ],
+            "option-data": [
+                {
+                    "name": "routers",
+                    "data": "{{ kea_gateway_4 }}"
+                },
+                {
+                    "name": "domain-name-servers",
+                    "data": "{{ kea_dns_servers_4 | join(', ') }}"
+                },
+                {
+                    "name": "domain-name",
+                    "data": "{{ kea_domain }}"
+                }
+            ]
+        },
+        {
+            "id": 5,
+            "subnet": "{{ kea_subnet4_5 }}",
+            "pools": [
+                {
+                    "pool": "{{ kea_pool5_start }} - {{ kea_pool5_end }}",
+                    "user-context": {
+                        "comment": "{{ kea_pool5_name }}"
+                    }
+                }
+            ],
+            "reservations": [
+{% for host in kea_reservations if host_in_subnet(host.ip_address, kea_subnet4_5) | trim == 'true' %}
+                {
+                    "hw-address": "{{ host.hw_address }}",
+                    "ip-address": "{{ host.ip_address }}"
+                    {%- if host.hostname is defined %},
+                    "hostname": "{{ host.hostname }}"
+                    {%- endif %}
+
+                }{{ "," if not loop.last else "" }}
+{% endfor %}
+            ],
+            "option-data": [
+                {
+                    "name": "routers",
+                    "data": "{{ kea_gateway_5 }}"
+                },
+                {
+                    "name": "domain-name-servers",
+                    "data": "{{ kea_dns_servers_5 | join(', ') }}"
+                },
+                {
+                    "name": "domain-name",
+                    "data": "{{ kea_domain }}"
+                }
+            ]
+        },
+        {
+            "id": 6,
+            "subnet": "{{ kea_subnet4_6 }}",
+            "pools": [
+                {
+                    "pool": "{{ kea_pool6_start }} - {{ kea_pool6_end }}",
+                    "user-context": {
+                        "comment": "{{ kea_pool6_name }}"
+                    }
+                }
+            ],
+            "reservations": [
+{% for host in kea_reservations if host_in_subnet(host.ip_address, kea_subnet4_6) | trim == 'true' %}
+                {
+                    "hw-address": "{{ host.hw_address }}",
+                    "ip-address": "{{ host.ip_address }}"
+                    {%- if host.hostname is defined %},
+                    "hostname": "{{ host.hostname }}"
+                    {%- endif %}
+
+                }{{ "," if not loop.last else "" }}
+{% endfor %}
+            ],
+            "option-data": [
+                {
+                    "name": "routers",
+                    "data": "{{ kea_gateway_6 }}"
+                },
+                {
+                    "name": "domain-name-servers",
+                    "data": "{{ kea_dns_servers_6 | join(', ') }}"
+                },
+                {
+                    "name": "domain-name",
+                    "data": "{{ kea_domain }}"
+                }
+            ]
+        },
+        {
+            "id": 7,
+            "subnet": "{{ kea_subnet4_7 }}",
+            "pools": [
+                {
+                    "pool": "{{ kea_pool7_start }} - {{ kea_pool7_end }}",
+                    "user-context": {
+                        "comment": "{{ kea_pool7_name }}"
+                    }
+                }
+            ],
+            "reservations": [
+{% for host in kea_reservations if host_in_subnet(host.ip_address, kea_subnet4_7) | trim == 'true' %}
+                {
+                    "hw-address": "{{ host.hw_address }}",
+                    "ip-address": "{{ host.ip_address }}"
+                    {%- if host.hostname is defined %},
+                    "hostname": "{{ host.hostname }}"
+                    {%- endif %}
+
+                }{{ "," if not loop.last else "" }}
+{% endfor %}
+            ],
+            "option-data": [
+                {
+                    "name": "routers",
+                    "data": "{{ kea_gateway_7 }}"
+                },
+                {
+                    "name": "domain-name-servers",
+                    "data": "{{ kea_dns_servers_7 | join(', ') }}"
+                },
+                {
+                    "name": "domain-name",
+                    "data": "{{ kea_domain }}"
+                }
+            ]
+        }
+    ]
+}
+}

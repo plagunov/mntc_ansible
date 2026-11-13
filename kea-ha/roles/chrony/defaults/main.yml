@@ -1,0 +1,3 @@
+---
+chrony_package: chrony
+chrony_service: chrony

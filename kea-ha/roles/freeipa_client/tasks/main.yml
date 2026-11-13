@@ -1,0 +1,52 @@
+---
+- name: Установить клиент FreeIPA
+  ansible.builtin.apt:
+    name: "{{ ipa_client_packages }}"
+    state: present
+    update_cache: true
+
+- name: Проверить, введён ли хост в домен
+  ansible.builtin.stat:
+    path: /etc/ipa/default.conf
+  register: ipa_client_config
+
+- name: Проверить наличие cloud-init
+  ansible.builtin.stat:
+    path: /etc/cloud/cloud.cfg
+  register: cloud_cfg
+
+- name: Запретить cloud-init перезаписывать /etc/hosts
+  ansible.builtin.lineinfile:
+    path: /etc/cloud/cloud.cfg
+    regexp: '^manage_etc_hosts:'
+    line: "manage_etc_hosts: false"
+  when: cloud_cfg.stat.exists
+
+- name: Убрать привязку имени хоста к 127.0.1.1
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '^127\.0\.1\.1\s'
+    state: absent
+
+- name: Прописать адрес хоста в /etc/hosts
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '.*\b{{ inventory_hostname }}\b.*'
+    line: "{{ ansible_host }} {{ inventory_hostname }} {{ inventory_hostname.split('.')[0] }}"
+
+- name: Ввести хост в домен FreeIPA
+  ansible.builtin.command:
+    argv:
+      - ipa-client-install
+      - --unattended
+      - --force-join
+      - --domain={{ ipa_domain }}
+      - --realm={{ ipa_realm }}
+      - --server={{ ipa_server }}
+      - --principal={{ ipa_admin_principal }}
+      - --password={{ ipa_admin_password }}
+      - --hostname={{ inventory_hostname }}
+      - --ip-address={{ ansible_host }}
+      - --mkhomedir
+  when: not ipa_client_config.stat.exists
+  no_log: true

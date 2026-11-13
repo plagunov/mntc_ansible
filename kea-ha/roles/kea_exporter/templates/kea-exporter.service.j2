@@ -1,0 +1,15 @@
+[Unit]
+Description=Kea Prometheus Exporter
+After=network-online.target kea-ctrl-agent.service
+Wants=network-online.target kea-ctrl-agent.service
+
+[Service]
+Type=simple
+User={{ kea_exporter_user }}
+Group={{ kea_exporter_user }}
+ExecStart={{ kea_exporter_venv }}/bin/kea-exporter --address {{ kea_exporter_address }} --port {{ kea_exporter_port }} --interval {{ kea_exporter_interval }} {{ kea_exporter_target }}
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,7 @@
+---
+galaxy_info:
+  role_name: chrony
+  description: Синхронизация времени chrony для Kea HA
+  license: MIT
+  min_ansible_version: "2.14"
+dependencies: []
