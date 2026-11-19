@@ -28,7 +28,7 @@ kea_ha_servers:
 kea_subnet4: 192.168.80.0/22
 kea_pool_name: pool-83
 kea_pool_start: 192.168.83.130
-kea_pool_end: 192.168.83.254
+kea_pool_end: 192.168.83.249
 # Пул по User Class (DHCP option 77)
 kea_pool_class_accord: pool-83-accord
 kea_pool_class_start: 192.168.83.125
@@ -89,11 +89,11 @@ kea_reservations:
   - hw_address: "00:50:56:9a:cf:8d"
     ip_address: "192.168.80.20"
     hostname: "freeipa-1"
-  - hw_address: "00:50:56:9a:49:36"
-    ip_address: "192.168.80.254"
-    hostname: "baikal-test"
+  # - hw_address: "00:50:56:9a:49:36"
+  #   ip_address: "192.168.80.254"
+  #   hostname: "baikal-test"
   - hw_address: "ec:b1:e0:d0:2a:f8"
-    ip_address: "192.168.83.1"
+    ip_address: "192.168.83.254"
     hostname: "esr30"
   - hw_address: "00:50:56:9a:9f:b1"
     ip_address: "192.168.83.45"
