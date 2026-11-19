@@ -13,16 +13,16 @@ kea_ctrl_agent_port: 8000
 kea_domain: mntc.local
 kea_dns_servers:
   - 192.168.80.20
-  - 192.168.80.21
+  - 192.168.83.53
 
 kea_ha_mode: hot-standby
 kea_ha_primary_host: dhcp1.mntc.local
 kea_ha_servers:
   - name: dhcp1
-    ip: 192.168.80.22
+    ip: 192.168.83.77
     role: primary
   - name: dhcp2
-    ip: 192.168.80.23
+    ip: 192.168.83.78
     role: standby
 
 kea_subnet4: 192.168.80.0/22
